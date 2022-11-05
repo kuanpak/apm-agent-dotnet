@@ -165,35 +165,28 @@ namespace Elastic.Apm.Tests
 		public void DistributedTracingTest()
 		{
 			var payloadSender = new MockPayloadSender();
-			using var agent = new ApmAgent(new TestAgentComponents(payloadSender: payloadSender, apmServerInfo: MockApmServerInfo.Version716,
-					   configuration: new MockConfiguration(enableOpenTelemetryBridge: "true")));
+			using (var agent = new ApmAgent(new TestAgentComponents(payloadSender: payloadSender, apmServerInfo: MockApmServerInfo.Version716,
+					   configuration: new MockConfiguration(enableOpenTelemetryBridge: "true")))) OTSamples.DistributedTraceSample();
 
-			var src = new ActivitySource("Test");
-			string traceId = null;
-			string traceparent = null;
-			string tracestate = null;
-			using (var activity1 = src.StartActivity("foo", ActivityKind.Server))
-			{
-				traceId = activity1?.TraceId.ToString();
-				activity1?.SetTag("foo1", "bar1");
-				using (var activity2 = src.StartActivity("producer", ActivityKind.Producer))
-				{
-					activity2?.SetTag("foo2", "bar2");
-					traceparent = activity2?.Id;
-					tracestate = activity2?.TraceStateString;
-				}
-			}
-
-			ActivityContext.TryParse(traceparent, tracestate, out var parentContext);
-			using (var activity3 = src.StartActivity("remote_consumer", ActivityKind.Consumer, parentContext))
-			{
-				activity3?.SetTag("consumer", "test");
-			}
 
 			payloadSender.WaitForTransactions(count: 2);
 
+			payloadSender.FirstTransaction.TraceId.Should().Be(payloadSender.Transactions[1].TraceId, because: "The transactions should be under the same trace.");
+		}
+
+		/// <summary>
+		/// Make sure that the traceId on a root activity is the same as the traceId on the transaction which the bridge creates from the root activity.
+		/// </summary>
+		[Fact]
+		public void ActivityAndTransactionTraceIdSynced()
+		{
+			var payloadSender = new MockPayloadSender();
+			using var agent = new ApmAgent(new TestAgentComponents(payloadSender: payloadSender, apmServerInfo: MockApmServerInfo.Version716,
+				configuration: new MockConfiguration(enableOpenTelemetryBridge: "true")));
+			var src = new ActivitySource("Test");
+			string traceId;
+			using (var activity = src.StartActivity("foo", ActivityKind.Server)) traceId = activity.TraceId.ToString();
 			payloadSender.FirstTransaction.TraceId.Should().Be(traceId);
-			payloadSender.Transactions[1].TraceId.Should().Be(traceId);
 		}
 	}
 }
