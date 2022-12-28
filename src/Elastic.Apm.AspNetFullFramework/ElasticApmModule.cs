@@ -146,8 +146,6 @@ namespace Elastic.Apm.AspNetFullFramework
 			}
 
 			var transactionName = $"{request.HttpMethod} {request.Unvalidated.Path}";
-			if (SoapRequest.TryExtractSoapAction(_logger, request, out var soapAction))
-				transactionName += $" {soapAction}";
 
 			var distributedTracingData = ExtractIncomingDistributedTracingData(request);
 			ITransaction transaction;
@@ -371,11 +369,17 @@ namespace Elastic.Apm.AspNetFullFramework
 			}
 
 			transaction.Result = Transaction.StatusCodeToResult("HTTP", response.StatusCode);
-			if (transaction is Transaction realTransaction)
-			{
-				realTransaction.SetOutcome(response.StatusCode >= 500
+
+			var realTransaction = transaction as Transaction;
+			realTransaction?.SetOutcome(response.StatusCode >= 500
 					? Outcome.Failure
 					: Outcome.Success);
+
+			// Try and update transaction name with SOAP action if applicable.
+			if (realTransaction == null || !realTransaction.HasCustomName)
+			{
+				if (SoapRequest.TryExtractSoapAction(_logger, context.Request, out var soapAction))
+					transaction.Name += $" {soapAction}";
 			}
 
 			if (transaction.IsSampled)
@@ -426,7 +430,8 @@ namespace Elastic.Apm.AspNetFullFramework
 		private static bool InitOnceForAllInstancesUnderLock(string dbgInstanceName) =>
 			InitOnceHelper.IfNotInited?.Init(() =>
 			{
-				SafeAgentSetup(dbgInstanceName);
+				var agentComponents = CreateAgentComponents(dbgInstanceName);
+				Agent.Setup(agentComponents);
 
 				if (!Agent.Instance.ConfigurationReader.Enabled)
 					return;
@@ -461,15 +466,6 @@ namespace Elastic.Apm.AspNetFullFramework
 			agentComponents.Service.Language = new Language { Name = "C#" }; //TODO
 
 			return agentComponents;
-		}
-
-		private static void SafeAgentSetup(string dbgInstanceName)
-		{
-			var agentComponents = CreateAgentComponents(dbgInstanceName);
-			if (!agentComponents.ConfigurationReader.Enabled)
-				return;
-
-			Agent.Setup(agentComponents);
 		}
 
 		/// <summary>

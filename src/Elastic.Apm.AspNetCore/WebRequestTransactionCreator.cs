@@ -99,7 +99,7 @@ namespace Elastic.Apm.AspNetCore
 				{
 					Full = context.Request.GetEncodedUrl(),
 					HostName = context.Request.Host.Host,
-					Protocol = GetProtocolName(context.Request.Protocol),
+					Protocol = UrlUtils.GetProtocolName(context.Request.Protocol),
 					Raw = GetRawUrl(context.Request, logger) ?? context.Request.GetEncodedUrl(),
 					PathName = context.Request.Path,
 					Search = context.Request.QueryString.Value.Length > 0 ? context.Request.QueryString.Value.Substring(1) : string.Empty
@@ -146,19 +146,6 @@ namespace Elastic.Apm.AspNetCore
 			{
 				logger.Warning()?.LogException(e, "Failed reading RawUrl");
 				return null;
-			}
-		}
-
-		private static string GetProtocolName(string protocol)
-		{
-			switch (protocol)
-			{
-				case { } s when string.IsNullOrEmpty(s):
-					return string.Empty;
-				case { } s when s.StartsWith("HTTP", StringComparison.InvariantCulture): //in case of HTTP/2.x we only need HTTP
-					return "HTTP";
-				default:
-					return protocol;
 			}
 		}
 
@@ -210,8 +197,8 @@ namespace Elastic.Apm.AspNetCore
 
 				if (grpcCallInfo == default)
 				{
-					transaction.Result = Transaction.StatusCodeToResult(GetProtocolName(context.Request.Protocol), context.Response.StatusCode);
-					SetOutcomeForHttpResult(transaction, context.Response.StatusCode);
+					transaction.Result = Transaction.StatusCodeToResult(UrlUtils.GetProtocolName(context.Request.Protocol), context.Response.StatusCode);
+					transaction.SetOutcomeForHttpResult(context.Response.StatusCode);
 				}
 				else
 				{
@@ -233,17 +220,6 @@ namespace Elastic.Apm.AspNetCore
 			finally
 			{
 				transaction.End();
-			}
-		}
-
-		internal static void SetOutcomeForHttpResult(ITransaction transaction, int HttpReturnCode)
-		{
-			if (transaction is Transaction realTransaction)
-			{
-				if (HttpReturnCode >= 500 || HttpReturnCode < 100)
-					realTransaction.SetOutcome(Outcome.Failure);
-				else
-					realTransaction.SetOutcome(Outcome.Success);
 			}
 		}
 

@@ -131,8 +131,10 @@ pipeline {
                       unstash 'source'
                       filebeat(output: "docker.log"){
                         dir("${BASE_DIR}"){
-                          dotnet(){
-                            sh label: 'Test & coverage', script: '.ci/linux/test.sh'
+                          testTools(){
+                            dotnet(){
+                              sh label: 'Test & coverage', script: '.ci/linux/test.sh'
+                            }
                           }
                         }
                       }
@@ -546,6 +548,22 @@ pipeline {
             }
           }
         }
+        stage('Publish Docker image') {
+          environment {
+            DOCKER_SECRET = 'secret/apm-team/ci/docker-registry/prod'
+            DOCKER_REGISTRY = 'docker.elastic.co'
+            HOME = "${env.WORKSPACE}"
+          }
+          steps {
+            withGithubNotify(context: 'Create Docker image - Linux') {
+              dir("${BASE_DIR}"){
+                dockerLogin(secret: env.DOCKER_SECRET, registry: env.DOCKER_REGISTRY)
+                sh(script: 'chmod +x .ci/linux/push_docker.sh')
+                sh(label: 'Publish Docker Image', script: '.ci/linux/push_docker.sh')
+              }
+            }
+          }
+        }
       }
     }
     stage('AfterRelease') {
@@ -609,12 +627,44 @@ def dotnet(Closure body){
     ./dotnet-install.sh --install-dir "\${DOTNET_ROOT}" -version '3.1.100'
     ./dotnet-install.sh --install-dir "\${DOTNET_ROOT}" -version '5.0.100'
     ./dotnet-install.sh --install-dir "\${DOTNET_ROOT}" -version '6.0.100'
+    ./dotnet-install.sh --install-dir "\${DOTNET_ROOT}" -version '7.0.100'
     """)
     withAzureCredentials(path: "${homePath}", credentialsFile: '.credentials.json') {
       withTerraformEnv(version: '0.15.3'){
         body()
       }
     }
+  }
+}
+
+def testTools(Closure body){
+  def homePath = "${env.WORKSPACE}/${env.BASE_DIR}"
+  withEnv([
+    "PATH=${homePath}/azure-functions-cli:${PATH}"
+    ]){
+    sh(label: 'Install Azure Functions Core Tools', script: """
+      # See: https://github.com/Azure/azure-functions-core-tools#other-linux-distributions
+
+    # Get the URL for the latest v4 linux-64 artifact
+    latest_v4_release_url=\$(curl -s https://api.github.com/repos/Azure/azure-functions-core-tools/releases \
+      | jq -r '.[].assets[].browser_download_url' \
+      | grep 'Azure.Functions.Cli.linux-x64.4.*zip\$' \
+      | head -n 1)
+    
+    # Preserve only the filename component of the URL
+    latest_v4_release_file=\${latest_v4_release_url##*/}
+
+    # Download the artifact
+    curl -sLO "\${latest_v4_release_url}"
+
+    # Unzip the artifact to ./azure-functions-cli
+    unzip -d azure-functions-cli "\${latest_v4_release_file}"
+
+    # Make required executables ... executable.
+    chmod +x ./azure-functions-cli/func
+    chmod +x ./azure-functions-cli/gozip
+    """)
+    body()
   }
 }
 
